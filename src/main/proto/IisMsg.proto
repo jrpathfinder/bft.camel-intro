@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package com.bftcom.iis.camel;
+
+option java_package = "com.bftcom.iis.camel.generated";
+option java_outer_classname = "IisMsgProtos";
+
+message RequestMsg {
+  string dtsend = 1;
+  string dtrecieved = 2;
+  string ip = 3;
+  string guid = 4;
+}
