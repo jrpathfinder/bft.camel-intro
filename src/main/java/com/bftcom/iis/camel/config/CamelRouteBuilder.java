@@ -93,9 +93,8 @@ public class CamelRouteBuilder extends RouteBuilder {
 
         from("direct:sql_test")
                 .process(exchange -> {
-                    IisMsgProtos.RequestMsg requestMsg = (IisMsgProtos.RequestMsg) exchange.getIn().getBody();
-                    requestMsg.getDtrecieved();
-                    Map<String, Object> dataMap = new HashMap<>(4);
+                    final var requestMsg = (IisMsgProtos.RequestMsg) exchange.getIn().getBody();
+                    final var dataMap = new HashMap<>(4);
                     dataMap.put("dtRecieved", requestMsg.getDtrecieved());
                     exchange.getIn().setBody(dataMap);
                 })
