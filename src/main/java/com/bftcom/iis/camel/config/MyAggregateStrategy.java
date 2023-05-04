@@ -21,7 +21,7 @@ public class MyAggregateStrategy implements AggregationStrategy {
         log.debug("Aggregate new : " + newLine);
 
         // put lines together separating by semicolon
-        agLines = agLines + ";" + newLine;
+        agLines = agLines + "," + newLine;
         // put combined line back on old to preserve it
         oldExchange.getIn().setBody(agLines);
 

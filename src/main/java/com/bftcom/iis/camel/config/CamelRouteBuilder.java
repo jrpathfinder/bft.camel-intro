@@ -4,7 +4,6 @@ import com.bftcom.iis.camel.generated.IisMsgProtos;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
-import org.apache.camel.Processor;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.builder.ThreadPoolBuilder;
 import org.apache.camel.component.sql.SqlComponent;
@@ -21,6 +20,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 @Service
@@ -59,35 +59,29 @@ public class CamelRouteBuilder extends RouteBuilder {
 
         from("direct:kafka-producer")
                 .routeId("Kafka Producer")
-                .process(new Processor() {
-                    @Override
-                    public void process(Exchange exchange) throws Exception {
-                        log.info("Send request message to Kafka {}", exchange.getIn().getBody());
-                        final var inputDto = (LinkedHashMap) exchange.getIn().getBody();
-                        final var dtRecieved = (String) inputDto.get("date");
-                        final var ip = (String) exchange.getIn().getHeader("ip");
-                        final var dtCreated = LocalDateTime.now();
-                        final var fmt = DateTimeFormatter.ofPattern(DATE_FORMAT);
-                        exchange.getIn().setBody(IisMsgProtos.RequestMsg.newBuilder()
-                                .setDtrecieved(dtRecieved)
-                                .setDtsend(dtCreated.format(fmt))
-                                .setIp(ip)
-                                .build());
-                    }
+                .process(exchange -> {
+                    log.info("Send request message to Kafka {}", exchange.getIn().getBody());
+                    final var inputDto = (LinkedHashMap) exchange.getIn().getBody();
+                    final var dtRecieved = (String) inputDto.get("date");
+                    final var ip = (String) exchange.getIn().getHeader("ip");
+                    final var dtCreated = LocalDateTime.now();
+                    final var fmt = DateTimeFormatter.ofPattern(DATE_FORMAT);
+                    exchange.getIn().setBody(IisMsgProtos.RequestMsg.newBuilder()
+                            .setDtrecieved(dtRecieved)
+                            .setDtsend(dtCreated.format(fmt))
+                            .setIp(ip)
+                            .build());
                 })
                 .marshal()
                 .protobuf()
-                .to("kafka:getDateTopic?brokers=localhost:29092");
+                .to("kafka:getDateTopic?brokers=localhost:29092").to("direct:kafka-get");
 
-        from("kafka:getDateTopic?brokers=localhost:29092")
+        from("direct:kafka-get")
+                .to("kafka:getDateTopic?brokers=localhost:29092")
                 .routeId("Kafka Consumer")
                 .unmarshal()
                 .protobuf("com.bftcom.iis.camel.generated.IisMsgProtos$RequestMsg")
                 .log("Message received from Kafka : ${body}")
-                .log("    on the topic ${headers[kafka.TOPIC]}")
-                .log("    on the partition ${headers[kafka.PARTITION]}")
-                .log("    with the offset ${headers[kafka.OFFSET]}")
-                .log("    with the key ${headers[kafka.KEY]}")
                 .to("direct:sql_test");
 
         // create a thread pool builder
@@ -98,30 +92,24 @@ public class CamelRouteBuilder extends RouteBuilder {
         ExecutorService executorService = builder.poolSize(5).maxPoolSize(25).maxQueueSize(200).build("MyPool");
 
         from("direct:sql_test")
-                .process(new Processor() {
-                    @Override
-                    public void process(Exchange exchange) throws Exception {
-                        IisMsgProtos.RequestMsg requestMsg = (IisMsgProtos.RequestMsg) exchange.getIn().getBody();
-                        requestMsg.getDtrecieved();
-                        Map<String, Object> dataMap = new HashMap<>();
-                        dataMap.put("dtRecieved", requestMsg.getDtrecieved());
-                        exchange.getIn().setBody(dataMap);
-                    }
+                .process(exchange -> {
+                    IisMsgProtos.RequestMsg requestMsg = (IisMsgProtos.RequestMsg) exchange.getIn().getBody();
+                    requestMsg.getDtrecieved();
+                    Map<String, Object> dataMap = new HashMap<>(4);
+                    dataMap.put("dtRecieved", requestMsg.getDtrecieved());
+                    exchange.getIn().setBody(dataMap);
                 })
-                .to("sql:select * from habrdb.test where dt_start > TO_TIMESTAMP(:#dtRecieved,'YYYY-MM-DD')")
-                .log(">>> ${body} - ${threadName}")
+                .to("sql:select * from habrdb.test where dt_start > TO_TIMESTAMP(:#dtRecieved,'YYYY-MM-DD HH:MI:SS')")
                 .split(body(), new MyAggregateStrategy())
                 .parallelProcessing()
                 .executorService(executorService)
-                .process(new Processor() {
-                    @Override
-                    public void process(Exchange exchange) throws Exception {
-                        log.info(exchange.getIn().getBody().toString());
-                        Map<String, String> dataMap = (LinkedCaseInsensitiveMap) exchange.getIn().getBody();
-                        dataMap.put("train_name", dataMap.get("train_name").toUpperCase());
-                        exchange.getIn().setBody(dataMap);
-                    }
+                .process(exchange -> {
+                    log.info(exchange.getIn().getBody().toString());
+                    Map<String, String> dataMap = (LinkedCaseInsensitiveMap) exchange.getIn().getBody();
+                    dataMap.put("train_name", Objects.requireNonNull(dataMap.get("train_name")).toUpperCase());
+                    exchange.getIn().setBody(dataMap);
                 })
+                .log(">>> ${body} - ${threadName}")
                 .setHeader(Exchange.HTTP_RESPONSE_CODE, constant(201));
     }
 }
